@@ -1,305 +1,394 @@
-# !/usr/bin/env python
-# coding: utf-8
+#from __future__ import division
+import threading
 
-"""
-    pyvse
-    ~~~~~
-    A high-level API designed for MarketWatch Virtual Stock Exchange games.
+import time
 
-    Author: Kevin Chen
-    Email: kvchen@berkeley.edu
-
-    Contributor: Andrew Han
-    Email: handrew@stanford.edu
-"""
-
+from yahoo_finance import Share
+import math
+import pyvse2
+import pause
+import datetime
 import requests
-import re
 import json
-from datetime import datetime, date, timedelta
-from time import mktime
+import pprint
+import urllib2
 from bs4 import BeautifulSoup
-from math import fabs
+from urllib import urlopen
+from delorean import Delorean
+import sys
 
-STOCK_ACTIONS = ["Buy", "Sell", "Short", "Cover"]
-TIME_DELAY = 5
+#### ADD DAY, after month in wait time
+#print ystockquote.get_price("GOOG")
+print ("\rInitializing BenBot v.01 ..... Please wait"),
+#time.sleep(2)
+print "\rWelcome to the BenBot auto trader! Starting up now."
 
-BASE_URL = "http://www.marketwatch.com"
-ID_URL = "https://id.marketwatch.com"
-
-URL_SUFFIX = {
-    "status": BASE_URL + "/user/login/status",
-    "profile": BASE_URL + "/my",
-    "login": ID_URL + "/auth/submitlogin.json",
-    "game": BASE_URL + "/game/{0}",
-    "trade": BASE_URL + "/game/{0}/trade?week=1", 
-    "submit_order": BASE_URL + "/game/{0}/trade/submitorder?week=1",
-    "holdings_info": BASE_URL + "/game/{0}/portfolio/Holdings?partial=True",
-    "value": BASE_URL + "/game/{0}/portfolio/Holdings"
-}
-
-def mw_url(suffix, *args):
-    return URL_SUFFIX[suffix].format(*args)
+sys.stdout.write('Starting test')
+sys.stdout.flush()
+sys.stdout.write('\rtest2')
+sys.stdout.flush()
 
 
-class VSESession(object):
-    def __init__(self, delay = 5):
-        """Initializes a VSESession, through which all API calls are routed.
+OpenHour = 8
+CloseHour = 15
+#datetime.datetime()
 
-        @param delay: Seconds to delay scraping data to prevent rate-limiting
-        """
-        self.session = requests.Session()
-        self.delay = delay
-        self.games = {}
+def getTime():
+    return int(time.time())
 
-    def login(self, username, password):
-        """Logs a VSESession into the Marketwatch VSE.
-
-        @param username: email used with the Marketwatch VSE
-        @param password: corresponding password
-        """
-        userdata = {"username": username, "password": password}
-
-        r = self.session.get(mw_url("login"), params=userdata, verify=True)
-
-        # MarketWatch returns a validation URL, which we visit to complete 
-        # the login handshake.
-        conf_url = json.loads(r.text)["url"]
-        
-        try:
-            self.session.get(conf_url)
-        except requests.exceptions.ConnectionError as e:
-            print("An error may occur during day trading. This is normal.")
-            print(e.args[0].reason)
-
-        # Confirm that we have logged in successfully
-        if self.session.get(mw_url("status")).url != mw_url("profile"):
-            print("Invalid username/password combination.")
-        else:
-            print("Successful login!")
-
-    def game(self, game_id):
-        """Returns a Game object.
-
-        @param game_id: 
-        """
-        if game_id in self.games:
-            return self.games[game_id]
-        else:
-            self.games[game_id] = Game(game_id, self)
-            return self.games[game_id]
+BiggestGainPercent = 0.0
+BiggestGainName = str("None!")
+BiggestGainShares = 0
 
 
-class Game(object):
-    order_headers = {'Content-Type': 'application/json; charset=utf-8'}
 
-    def __init__(self, game_id, vse_session):
-        """Creates a Game object, parented to a VSESession."""
-        self.game_id = game_id
-        self.vse_session = vse_session
+List = open("stocks.txt").readlines()
 
-        self.positions = {} # array of stock objects
-        self.__updatePositions()
+stocks = {}
 
-    @property
-    def value(self):
-        r = self.vse_session.session.get(mw_url("value", self.game_id))
-        soup = BeautifulSoup(r.text)
-        worth = soup.find('ul', {"class": "performance"}).li.find('span', {"class": "data"}).getText()
-        worth = worth.replace("$", "").replace(",", "")
-        return float(worth)
+def Start_Tracking_Stocks():
+    global stocks
 
-    def transaction(self, ticker, shares, action):
-        """Carries out a transaction on a Stock object.
+    StocksAdded = 0
+    for stockSymb in List:
+        thestock = str(stockSymb).strip("\n")
+        time.sleep(1/4)
+        #print Share(thestock).get_avg_daily_volume()
+        #print Share(thestock).get_price()
+        stocks[thestock] = {}
+       # print stocks.get(thestock)
+        StocksAdded += 1
 
-        @param shares: Number of shares to be exchanged in this transaction.
-        @param action: Type of transaction to be carried out.
-        """
 
-        stock = self.stock(ticker)
 
-        if action not in STOCK_ACTIONS:
-            print("Invalid stock action.")
-            return
+    #stocks = { "GOOG": {}, "RCKY": {}}
+    #print stocks
+    print StocksAdded,
+    print " stocks being tracked.\n"
 
-        payload = [{"Fuid": stock.trading_symbol, 
-                    "Shares": str(shares), 
-                    "Type": action}]
+Start_Tracking_Stocks()
 
-        p = self.vse_session.session.post(mw_url("submit_order", self.game_id), 
-            headers = self.order_headers, data=json.dumps(payload))
+def PostMarketWait():
+    CST = "US/Central"
+    #Delorean.datetime(datetime.datetime.now().year,datetime.datetime.now().month,datetime.datetime.now().day+1,OpenHour,30)
+    #d = Delorean(timezone=CST)
+    #return datetime.datetime(datetime.datetime.now().year,datetime.datetime.now().month,datetime.datetime.now().day+1,OpenHour,30)
+    return 1000
 
-        resp = json.loads(p.text)
-        if resp["succeeded"] == False:
-            print("Transaction for {0} failed. {1}"
-                .format(stock.symbol, resp["message"]))
-            return
+def get_stock_quote(ticker):
+    url = '%s%s' % ('http://www.google.com/finance/info?q=', ticker)
+    doc = urlopen(url)
+    content = doc.read()
+    quote = json.loads(content[3:])
+    quote = float(quote[0][u'l'])
+    return quote
 
-        self.__updatePositions()
+def CurrentStockTracker():
+    GoogShares = 0
+    while True:
+        global BiggestGainName
+        global BiggestGainShares
+        global BiggestGainPercent
 
-    def __getNumberOfSharesToInvest(self, ticker, moneyToSpend):
-        obj = self.stock(ticker)
-        price = obj.price
-        numSharesToInvest = int(moneyToSpend / price)
-        return numSharesToInvest
+        username = "hockeymikey@grottomc.com"
+        password = "bendorman"
 
-    def rebalance(self, stockWeights):
-        self.__updatePositions()
-        value = self.value
+        my_session = pyvse2.VSESession()
+        my_session.login(username, password)
 
-        if (len(self.positions) == 0):
-            for ticker in stockWeights:
-                weight = stockWeights[ticker]
-                moneyToSpend = weight * value
-                numSharesToBuy = self.__getNumberOfSharesToInvest(ticker, moneyToSpend)
-                self.transaction(ticker, numSharesToBuy, "Buy")
-        else:
-            # Note that we are assuming some amount of margin.
-            ownedTickers = self.__positionNames()
-            targetTickers = list(stockWeights.keys())
+        my_game = my_session.game("bendormanse")
 
-            """ Positions we currently have that we need to exit completely """
-            for ticker in ownedTickers:
-                if ticker not in targetTickers:
-                    numSharesOwned = self.positions[ticker].position
-                    action = "Sell" if numSharesOwned > 0 else "Cover"
-                    numSharesOwned = fabs(numSharesOwned)
-                    self.transaction(ticker, numSharesOwned, action)
+        CurShares = 0
+        CurStock = "None!"
 
-            self.__updatePositions()
+        print "Selling Goog placeholder stocks."
+        my_game.sell("GOOG", GoogShares)
 
-            ############################
-            ownedTickers = self.__positionNames()
-            targetTickers = list(stockWeights.keys())
+        #while datetime.datetime.now().hour is not 14 and datetime.datetime.now().minute < 55:
+        while True:
 
-            """ Overlap between positions we have a little bit of and need to rebalance """
-            for ticker in ownedTickers:
-                if ticker in targetTickers:
-                    weight = stockWeights[ticker]
-                    moneyToInvest = weight * value
-                    numSharesToHave = self.__getNumberOfSharesToInvest(ticker, moneyToInvest)
-                    currentPosition = self.positions[ticker].position
 
-                    action = "Buy"
-                    if (currentPosition < 0):
-                        if (numSharesToHave > currentPosition):
-                            action = "Cover"
-                        else:
-                            action = "Short"
+
+
+            #print "party"
+            ExTime = getTime()
+
+            #If we already have a stock
+            if CurStock != 'None!':
+
+                price1 = {}
+                price2 = {}
+
+                L = 0
+
+                inv = {}
+                #print "test1"
+                #print stocks[CurStock]
+                #print stocks.get(CurStock)
+                for inv in stocks[CurStock].iteritems():
+                    print inv
+                    if price1 == {}:
+                        price1 = inv
                     else:
-                        if (numSharesToHave > currentPosition):
-                            action = "Buy"
-                        else:
-                            action = "Sell"
+                        price2 = inv
+                print "price 1 and 2"
+                print price1
+                print price2
 
-                    difference = fabs(currentPosition - numSharesToHave)
+                if price2.keys() > price1.keys():
+                    L = math.sqrt((price2.keys() - price1.keys())**2 + (price2[price2.keys()] - price1[price1.keys()])**2)
+                else:
+                    L = math.sqrt((price1.keys() - price2.keys())**2 + (price1[price1.keys()] - price2[price2.keys()])**2)
 
-                    self.transaction(ticker, difference, action)
+                if L < 0:
+                    my_game.sell(CurStock, CurShares)
 
-            self.__updatePositions()
+                    BiggestGainName = CurStock
 
-            ############################
-            ownedTickers = self.__positionNames()
-            targetTickers = list(stockWeights.keys())
+                    CurStockHook = Share(CurStock)
 
-            """ Positions we don't have that we need to initialize """
-            for ticker in targetTickers:
-                if ticker not in ownedTickers:
-                    weight = stockWeights[ticker]
-                    moneyToSpend = weight * value
-                    numSharesToBuy = self.__getNumberOfSharesToInvest(ticker, moneyToSpend)
-                    self.transaction(ticker, numSharesToBuy, "Buy") 
+                    FinalBuy = 0
 
-        self.__updatePositions()
+                    shareAmount = int(math.floor(my_game.value - 3000.0 ) / get_stock_quote(CurStock)   )
 
-    def __updatePositions(self):
-        r = self.vse_session.session.get(mw_url("holdings_info", self.game_id))
-        soup = BeautifulSoup(r.text)
+                    CurShare = shareAmount
 
-        try: 
-            allRows = soup.find('table', {'class': 'highlight'}).tbody.findAll('tr')
-        except AttributeError:
-            allRows = []
+                    BiggestGainShares = CurShares
 
-        for i in range(0, len(allRows)):
-            symbol = allRows[i]['data-ticker']
-            trading_symbol = allRows[i]['data-symbol']
-            numShares = int(float(allRows[i]['data-shares']))
-            tradeType = allRows[i]['data-type']
-            
-            position = numShares
-            if (tradeType == "Short"):
-                position = numShares * -1
+                    if (int(CurStockHook.get_avg_daily_volume())) / 10 < shareAmount:
 
-            stockObj = self.stock(symbol, trading_symbol = trading_symbol, position = position)
+                        MaxVol = ((int(CurStockHook.get_avg_daily_volume()) / 10 )-10 )
 
-            self.positions[symbol] = (stockObj)
+                        toBuy = shareAmount / MaxVol
 
-    def __positionNames(self):
-        return list(self.positions.keys())
+                        if not toBuy % 0:
+                            left = shareAmount / CurStockHook.get_avg_daily_volume() % 10
+                            toBuy = toBuy - left
+                            FinalBuy = math.floor(shareAmount / (1/left))
 
-    def buy(self, ticker, shares):
-        self.transaction(ticker, shares, "Buy")
+                        for x in range(1, toBuy):
+                            my_game.buy(CurStock, MaxVol )
 
-    def sell(self, ticker, shares):
-        self.transaction(ticker, shares, "Sell")
+                        my_game.buy(CurStock, FinalBuy )
+                        print "Bought "+CurStock+" \n"
 
-    def short(self, ticker, shares):
-        self.transaction(ticker, shares, "Short")
+                    else:
+                        my_game.buy(CurStock, shareAmount )
+                        print "Bought "+CurStock+" \n"
 
-    def cover(self, ticker, shares):
-        self.transaction(ticker, shares, "Cover")
+            #We don't have a stock we are currently trading.
 
-    def stock(self, symbol, trading_symbol = None, position = 0):
-        return Stock(symbol, trading_symbol, position, self)
 
-""" Really only functions so that we can get trading symbol easily for transactions within the Game object """
-class Stock():
-    def __init__(self, symbol, trading_symbol, position, game):
-        """
-        @param symbol: Normal ticker symbol of a stock
-        @param trading_symbol: the symbol that Marketwatch uses to trade
-        """
+            elif BiggestGainName != 'None!':
+                print "now we here"
+                #print BiggestGainName
+                CurStock = BiggestGainName
 
-        self.symbol = symbol
-        self.game = game
-        self.trading_symbol = trading_symbol if type(trading_symbol) != type(None) else self.get_trading_symbol()
 
-        self.position = position
+                CurStockHook = Share(CurStock)
 
-    def get_trading_symbol(self):
-        payload =  {"search": self.symbol, "view": "grid", "partial": True}
-        p = self.game.vse_session.session.post(mw_url("trade", self.game.game_id), params=payload)
-        
-        data = BeautifulSoup(p.text)
+                #FinalBuy = 0
 
-        try:
-            symbol = data.find("div", {"class": "chip"})['data-symbol']
-        except:
-            print "Could not find symbol: %s." % self.symbol
-            symbol = ""
+                shareAmount = int(math.floor(my_game.value - 3000.0 ) / get_stock_quote(CurStock)  )
 
-        self.trading_symbol = symbol
-        return symbol
+                #print shareAmount,
+                #print " the shares"
 
-    # Retrieves the price of a stock by scraping Yahoo! Finance. Returns a float.
-    @property
-    def price(self):
-        standardTicker = self.symbol
-        yfID = "yfs_l84_" + standardTicker.lower()
-        try:
-            yfURL = "http://finance.yahoo.com/quotes/" + standardTicker
-            r = requests.get(yfURL)
-            soup = BeautifulSoup(r.text)
-        except:
-            yfURL = "http://finance.yahoo.com/q?s=" + standardTicker + "&ql=1"
-            r = requests.get(yfURL)
-            soup = BeautifulSoup(r.text)
+                BiggestGainShares = shareAmount
+                CurShares = BiggestGainShares
+                #print "sh "
+                #print shareAmount
 
-        try:
-            price = soup.find("span", {"id": yfID}).getText()
-            price = float(price)
-        except AttributeError:
-            price = self.retrievePrice()
-            
-        return price
+                #print "v"
+                #print ystockquote.get_volume(CurStock)
+
+                if (int(CurStockHook.get_avg_daily_volume()) / 100) <= shareAmount:
+
+                    MaxVol = int( int(int(CurStockHook.get_avg_daily_volume()) / 100)-10 )
+
+                    toBuy = int(math.floor(shareAmount / MaxVol))
+
+                    FinalBuy = 0
+
+                    if shareAmount % MaxVol != 0:
+                        left = shareAmount % MaxVol
+                       # toBuy = toBuy - left
+                       # FinalBuy = math.floor(shareAmount / (1/left))
+
+                    for x in range(1, toBuy):
+                        my_game.buy(CurStock, MaxVol )
+                    #print "finalbuy",
+                    #print FinalBuy
+
+                    if FinalBuy != 0:
+                        my_game.buy(CurStock, FinalBuy )
+                    print "Bought "+CurStock+" \n"
+
+                else:
+                    my_game.buy(CurStock, shareAmount )
+                    #print "wow"+CurStock+"wow"
+                    #print CurStock,
+                    print "Bought "+CurStock+" \n"
+
+                    #print "test\n",
+
+                    # my_game.buy(CurStock, shareAmount )
+
+            else:
+                print "Waiting for warmer weather :/"
+
+            if getTime() - ExTime < 60:
+                time.sleep(60 - (getTime() - ExTime))
+            else:
+                print "[Warning]: Running behind in Current Stock!"
+
+
+        my_game.sell(CurStock, CurShares)
+
+        shareAmount = int(math.floor(my_game.value - 3000.0 ) / float(Share("GOOG").get_price())  )
+        my_game.buy("GOOG", shareAmount )
+
+        GoogShares = shareAmount
+        pause.until(PostMarketWait())
+
+
+
+
+def get_quote(symbol):
+
+
+    while True:
+        #while datetime.datetime.now().hour != 14 and datetime.datetime.now().minute < 55:
+        while True:
+           # print "tracking now!"
+            thetime = getTime()
+            #price = Share(symbol).get_price()
+
+            price = get_stock_quote(symbol)
+            #print price
+            oldestPrice = 0
+
+            for oldPrice in stocks[symbol].keys():
+                if len(stocks[symbol].keys()) < 2:
+                    break
+
+                if oldestPrice == 0:
+                    oldestPrice = oldPrice
+
+                if oldPrice < oldestPrice:
+                    oldestPrice = oldPrice
+            stocks[symbol].pop(oldestPrice, None)
+
+            stime = str(thetime)
+            stocks[symbol].update({thetime: price})
+
+            time.sleep(60)
+
+
+        stocks[symbol].clear()
+        #while datetime.datetime.now() is not
+        pause.until(PostMarketWait())
+
+
+
+
+
+for key in stocks.keys():
+    print key+" has started tracking."
+    t = threading.Thread(target=get_quote, args = (key,))
+    t.daemon = True
+    t.start()
+
+
+def MainThread():
+    print "hi mike"
+    global BiggestGainName
+    global BiggestGainShares
+    global BiggestGainPercent
+
+
+    while True:
+        #print "Main Start"
+        CurrentStockStarted = False
+        firstrun = True
+
+
+        #main thread
+        while True:
+            #print "starting!"
+
+            if firstrun == True:
+                time.sleep(5)
+                firstrun = False
+            curtime = getTime()
+
+            AStock = {}
+
+            #AStock will return a tuple (stock {dict))
+            for AStock in stocks.viewitems():
+                #print "Astock"
+                #print AStock
+                xtime1 = 0
+                xtime2 = 0
+
+                yPrice1 = 0
+                yPrice2 = 0
+
+
+                gain = 0
+
+                inv = {}
+
+                stockvalues = AStock[1]
+
+                for inv in stockvalues.iteritems():
+                    #print "inv"
+                    #print(inv)
+
+                    if xtime1 == 0:
+                        #print inv[1]
+                        xtime1 = int(inv[0])
+                        yPrice1 = float(inv[1])
+                    else:
+                        xtime2 = int(inv[0])
+                        yPrice2 = float(inv[1])
+
+                if xtime2 > xtime1:
+                    gain = math.sqrt((xtime2 - xtime1)**2 + (yPrice2 - yPrice1)**2)
+                else:
+                    gain = math.sqrt((xtime1 - xtime2)**2 + (yPrice1 - yPrice2)**2)
+
+                if gain > BiggestGainPercent:
+                    BiggestGainPercent = gain
+                    BiggestGainName = AStock[0]
+
+            if getTime() - curtime < 62:
+                time.sleep(62 - (getTime() - curtime))
+            else:
+                print "[Warning]: Running behind in updating stocks!"
+
+            #print "starting?"
+            if CurrentStockStarted == False:
+                print "Starting the buyer"
+                t = threading.Thread(target=CurrentStockTracker)
+                t.daemon = True
+                t.start()
+                CurrentStockStarted = True
+
+        pause.until(PostMarketWait())
+        Start_Tracking_Stocks()
+
+MainThread()
+
+# old code, ignore
+if __name__ == "__main__":
+    username = "michaelhajostek@isd593.org"
+    password = "Bantam22"
+
+    my_session = pyvse2.VSESession()
+    my_session.login(username, password)
+
+    my_game = my_session.game("bendormanse")
+
+    goog = pyvse2.Stock("GOOGL","NASDAQ:GOOGL", 1, "bendormanse")
+    my_game.buy("DNDNQ", 22)
